@@ -1,4 +1,12 @@
+# Core
 streamlit==1.28.0
-psycopg2-binary==2.9.9
-pandas==2.1.0
-plotly==6.9.0
+pandas
+
+# Plotting
+plotly
+
+# PostgreSQL
+psycopg2-binary
+
+# Optional for nicer logging
+rich
