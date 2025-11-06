@@ -14,13 +14,16 @@ st.set_page_config(
 )
 
 # Conexión a la base de datos
+# Conexión a la base de datos Supabase
 @st.cache_resource
 def get_connection():
     return psycopg2.connect(
-        host="localhost",
-        database="kpi",
-        user="postgres",
-        password="postgres"
+        host="aws-1-us-east-2.pooler.supabase.com",
+        database="postgres",
+        user="postgres.fvueocvxawgrddeggmyj",
+        password="Bocajuniors1905!",
+        port=5432,
+        sslmode='require'
     )
 
 # Inicializar la base de datos
