@@ -165,13 +165,18 @@ def obtener_evaluaciones(fecha_inicio=None, fecha_fin=None):
     cur.close()
     return result
 
-# Mapeo de calificaciones
+# Mapeo de calificaciones (de MEJOR a PEOR)
 CALIFICACIONES = {
-    1: "Excelente",
-    2: "Bueno",
-    3: "Regular",
-    4: "Malo"
+    1: "⭐ Excelente",
+    2: "👍 Bueno", 
+    3: "⚠️ Regular",
+    4: "❌ Deficiente"
 }
+
+# Función para calcular puntuación invertida (mayor = mejor)
+def calcular_puntuacion_invertida(calificacion):
+    # Invertimos la escala: 1 se convierte en 4, 2 en 3, 3 en 2, 4 en 1
+    return 5 - calificacion
 
 # Inicializar base de datos
 init_db()
@@ -292,16 +297,13 @@ elif menu == "👥 Gestión de Integrantes":
     with tab1:
         st.subheader("Agregar Nuevo Integrante")
         
-        # Inicializar variables en session_state si no existen
         if 'mensaje_integrante' not in st.session_state:
             st.session_state.mensaje_integrante = None
         
-        # Mostrar mensaje si existe
         if st.session_state.mensaje_integrante:
             st.success(st.session_state.mensaje_integrante)
             st.session_state.mensaje_integrante = None
         
-        # Usar un formulario para limpiar automáticamente
         with st.form(key='form_integrante', clear_on_submit=True):
             col1, col2 = st.columns(2)
             
@@ -379,16 +381,13 @@ elif menu == "📋 Gestión de KPIs":
     with tab1:
         st.subheader("Agregar Nuevo KPI")
         
-        # Inicializar variables en session_state si no existen
         if 'mensaje_kpi' not in st.session_state:
             st.session_state.mensaje_kpi = None
         
-        # Mostrar mensaje si existe
         if st.session_state.mensaje_kpi:
             st.success(st.session_state.mensaje_kpi)
             st.session_state.mensaje_kpi = None
         
-        # Usar un formulario para limpiar automáticamente
         with st.form(key='form_kpi', clear_on_submit=True):
             nombre_kpi = st.text_input("Nombre del KPI", placeholder="Ej: Calidad del Código")
             descripcion_kpi = st.text_area(
@@ -451,6 +450,9 @@ elif menu == "📈 Reportes y Análisis":
         df_eval = pd.DataFrame(evaluaciones)
         df_eval['calificacion_texto'] = df_eval['calificacion'].map(CALIFICACIONES)
         
+        # Calcular puntuación invertida para ranking (mayor = mejor)
+        df_eval['puntuacion_invertida'] = df_eval['calificacion'].apply(calcular_puntuacion_invertida)
+        
         # Métricas generales
         st.subheader("📊 Resumen General")
         col1, col2, col3, col4 = st.columns(4)
@@ -458,20 +460,21 @@ elif menu == "📈 Reportes y Análisis":
         with col1:
             st.metric("Total Evaluaciones", len(df_eval))
         with col2:
-            promedio = df_eval['calificacion'].mean()
-            st.metric("Promedio General", f"{promedio:.2f}")
+            # Usar puntuación invertida para el promedio (mayor = mejor)
+            promedio_invertido = df_eval['puntuacion_invertida'].mean()
+            st.metric("Puntuación Promedio", f"{promedio_invertido:.2f}")
         with col3:
             excelentes = len(df_eval[df_eval['calificacion'] == 1])
-            st.metric("Excelentes", excelentes)
+            st.metric("⭐ Excelentes", excelentes)
         with col4:
-            malos = len(df_eval[df_eval['calificacion'] == 4])
-            st.metric("Malos", malos)
+            deficientes = len(df_eval[df_eval['calificacion'] == 4])
+            st.metric("❌ Deficientes", deficientes)
         
         st.markdown("---")
         
         # Gráficos
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "🏆 Ranking", 
+            "🏆 Ranking General", 
             "👥 Por Integrante", 
             "📋 Por KPI", 
             "📅 Histórico",
@@ -479,40 +482,47 @@ elif menu == "📈 Reportes y Análisis":
         ])
         
         with tab1:
-            st.subheader("🏆 Ranking de Desempeño")
+            st.subheader("🏆 Ranking General de Desempeño")
             
-            # Ranking por promedio
-            promedio_integrante = df_eval.groupby('integrante')['calificacion'].agg(['mean', 'count']).reset_index()
-            promedio_integrante.columns = ['Integrante', 'Promedio', 'Total Evaluaciones']
-            promedio_integrante = promedio_integrante.sort_values('Promedio')
+            # Calcular promedio de PUNTUACIÓN INVERTIDA por integrante (mayor = mejor)
+            promedio_integrante = df_eval.groupby('integrante').agg({
+                'puntuacion_invertida': 'mean',
+                'calificacion': 'count'
+            }).reset_index()
+            promedio_integrante.columns = ['Integrante', 'Puntuación', 'Total Evaluaciones']
+            
+            # Ordenar por puntuación invertida (mayor primero = mejores primero)
+            promedio_integrante = promedio_integrante.sort_values('Puntuación', ascending=False)
             promedio_integrante['Posición'] = range(1, len(promedio_integrante) + 1)
-            promedio_integrante['Desempeño'] = promedio_integrante['Promedio'].apply(
-                lambda x: 'Excelente' if x <= 1.5 else ('Bueno' if x <= 2.5 else ('Regular' if x <= 3.5 else 'Malo'))
+            
+            # Categorizar desempeño basado en puntuación invertida
+            promedio_integrante['Desempeño'] = promedio_integrante['Puntuación'].apply(
+                lambda x: '⭐ Excelente' if x >= 3.5 else ('👍 Bueno' if x >= 2.5 else ('⚠️ Regular' if x >= 1.5 else '❌ Deficiente'))
             )
             
-            # Tabla de ranking
+            # Tabla de ranking general
             col1, col2 = st.columns([2, 1])
             
             with col1:
                 fig_ranking = go.Figure()
                 
-                colors = promedio_integrante['Promedio'].apply(
-                    lambda x: 'green' if x <= 1.5 else ('lightgreen' if x <= 2.5 else ('orange' if x <= 3.5 else 'red'))
+                colors = promedio_integrante['Puntuación'].apply(
+                    lambda x: 'green' if x >= 3.5 else ('lightgreen' if x >= 2.5 else ('orange' if x >= 1.5 else 'red'))
                 )
                 
                 fig_ranking.add_trace(go.Bar(
                     y=promedio_integrante['Integrante'],
-                    x=promedio_integrante['Promedio'],
+                    x=promedio_integrante['Puntuación'],
                     orientation='h',
-                    text=promedio_integrante['Promedio'].apply(lambda x: f'{x:.2f}'),
+                    text=promedio_integrante['Puntuación'].apply(lambda x: f'{x:.2f}'),
                     textposition='outside',
                     marker_color=colors,
-                    hovertemplate='<b>%{y}</b><br>Promedio: %{x:.2f}<extra></extra>'
+                    hovertemplate='<b>%{y}</b><br>Puntuación: %{x:.2f}<extra></extra>'
                 ))
                 
                 fig_ranking.update_layout(
-                    title='Ranking por Promedio de Calificación (menor es mejor)',
-                    xaxis_title='Promedio',
+                    title='Ranking de Desempeño (mayor puntuación = mejor)',
+                    xaxis_title='Puntuación (mayor es mejor)',
                     yaxis_title='',
                     height=400,
                     showlegend=False
@@ -520,15 +530,29 @@ elif menu == "📈 Reportes y Análisis":
                 st.plotly_chart(fig_ranking, use_container_width=True)
             
             with col2:
-                st.markdown("### 📊 Tabla de Posiciones")
-                for idx, row in promedio_integrante.iterrows():
-                    emoji = "🥇" if row['Posición'] == 1 else ("🥈" if row['Posición'] == 2 else ("🥉" if row['Posición'] == 3 else "📍"))
-                    color = "green" if row['Promedio'] <= 1.5 else ("lightgreen" if row['Promedio'] <= 2.5 else ("orange" if row['Promedio'] <= 3.5 else "red"))
+                st.markdown("### 🏅 Top Mejores")
+                for idx, row in promedio_integrante.head(5).iterrows():
+                    emoji = "🥇" if row['Posición'] == 1 else ("🥈" if row['Posición'] == 2 else ("🥉" if row['Posición'] == 3 else "📈"))
+                    color = "green" if row['Puntuación'] >= 3.5 else ("lightgreen" if row['Puntuación'] >= 2.5 else ("orange" if row['Puntuación'] >= 1.5 else "red"))
                     
                     st.markdown(f"""
                     <div style='background-color: {color}; padding: 10px; margin: 5px 0; border-radius: 5px; color: white;'>
                         {emoji} <b>{row['Posición']}. {row['Integrante']}</b><br>
-                        Promedio: {row['Promedio']:.2f} | {row['Desempeño']}
+                        Puntuación: {row['Puntuación']:.2f}<br>
+                        {row['Desempeño']}
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                st.markdown("### ⚠️ Necesitan Mejora")
+                for idx, row in promedio_integrante.tail(3).iterrows():
+                    emoji = "🔴" if row['Puntuación'] < 1.5 else "🟡"
+                    color = "red" if row['Puntuación'] < 1.5 else "orange"
+                    
+                    st.markdown(f"""
+                    <div style='background-color: {color}; padding: 10px; margin: 5px 0; border-radius: 5px; color: white;'>
+                        {emoji} <b>{row['Posición']}. {row['Integrante']}</b><br>
+                        Puntuación: {row['Puntuación']:.2f}<br>
+                        {row['Desempeño']}
                     </div>
                     """, unsafe_allow_html=True)
             
@@ -544,10 +568,10 @@ elif menu == "📈 Reportes y Análisis":
                 title='Proporción de Calificaciones',
                 color=dist_general.index,
                 color_discrete_map={
-                    'Excelente': 'green',
-                    'Bueno': 'lightgreen',
-                    'Regular': 'orange',
-                    'Malo': 'red'
+                    '⭐ Excelente': 'green',
+                    '👍 Bueno': 'lightgreen',
+                    '⚠️ Regular': 'orange',
+                    '❌ Deficiente': 'red'
                 },
                 hole=0.4
             )
@@ -557,20 +581,23 @@ elif menu == "📈 Reportes y Análisis":
         with tab2:
             st.subheader("👥 Desempeño por Integrante")
             
-            # Promedio por integrante
-            promedio_integrante = df_eval.groupby('integrante')['calificacion'].agg(['mean', 'count']).reset_index()
-            promedio_integrante.columns = ['Integrante', 'Promedio', 'Evaluaciones']
-            promedio_integrante = promedio_integrante.sort_values('Promedio')
+            # Promedio por integrante usando PUNTUACIÓN INVERTIDA (mejores primero)
+            promedio_integrante = df_eval.groupby('integrante').agg({
+                'puntuacion_invertida': 'mean',
+                'calificacion': 'count'
+            }).reset_index()
+            promedio_integrante.columns = ['Integrante', 'Puntuación', 'Evaluaciones']
+            promedio_integrante = promedio_integrante.sort_values('Puntuación', ascending=False)  # Mayores primero (mejores)
             
             fig = px.bar(
                 promedio_integrante,
-                x='Promedio',
+                x='Puntuación',
                 y='Integrante',
                 orientation='h',
-                title='Promedio de Calificación por Integrante (menor es mejor)',
-                text='Promedio',
-                color='Promedio',
-                color_continuous_scale=['green', 'yellow', 'orange', 'red']
+                title='Puntuación por Integrante (mayor = mejor)',
+                text='Puntuación',
+                color='Puntuación',
+                color_continuous_scale=['red', 'orange', 'lightgreen', 'green']
             )
             fig.update_traces(texttemplate='%{text:.2f}', textposition='outside')
             fig.update_layout(height=400)
@@ -586,10 +613,10 @@ elif menu == "📈 Reportes y Análisis":
                 title='Distribución de Calificaciones por Integrante',
                 barmode='stack',
                 color_discrete_map={
-                    'Excelente': 'green',
-                    'Bueno': 'lightgreen',
-                    'Regular': 'orange',
-                    'Malo': 'red'
+                    '⭐ Excelente': 'green',
+                    '👍 Bueno': 'lightgreen',
+                    '⚠️ Regular': 'orange',
+                    '❌ Deficiente': 'red'
                 }
             )
             st.plotly_chart(fig2, use_container_width=True)
@@ -612,10 +639,10 @@ elif menu == "📈 Reportes y Análisis":
                         title=integrante,
                         color=dist_integrante.index,
                         color_discrete_map={
-                            'Excelente': 'green',
-                            'Bueno': 'lightgreen',
-                            'Regular': 'orange',
-                            'Malo': 'red'
+                            '⭐ Excelente': 'green',
+                            '👍 Bueno': 'lightgreen',
+                            '⚠️ Regular': 'orange',
+                            '❌ Deficiente': 'red'
                         }
                     )
                     fig_pie_int.update_traces(textposition='inside', textinfo='percent')
@@ -625,19 +652,23 @@ elif menu == "📈 Reportes y Análisis":
         with tab3:
             st.subheader("📋 Desempeño por KPI")
             
-            promedio_kpi = df_eval.groupby('kpi_nombre')['calificacion'].agg(['mean', 'count']).reset_index()
-            promedio_kpi.columns = ['KPI', 'Promedio', 'Evaluaciones']
-            promedio_kpi = promedio_kpi.sort_values('Promedio')
+            # Usar puntuación invertida para KPIs también
+            promedio_kpi = df_eval.groupby('kpi_nombre').agg({
+                'puntuacion_invertida': 'mean',
+                'calificacion': 'count'
+            }).reset_index()
+            promedio_kpi.columns = ['KPI', 'Puntuación', 'Evaluaciones']
+            promedio_kpi = promedio_kpi.sort_values('Puntuación', ascending=False)  # Mayores primero (mejores KPIs)
             
             fig = px.bar(
                 promedio_kpi,
-                x='Promedio',
+                x='Puntuación',
                 y='KPI',
                 orientation='h',
-                title='Promedio de Calificación por KPI (menor es mejor)',
-                text='Promedio',
-                color='Promedio',
-                color_continuous_scale=['green', 'yellow', 'orange', 'red']
+                title='Puntuación por KPI (mayor = mejor)',
+                text='Puntuación',
+                color='Puntuación',
+                color_continuous_scale=['red', 'orange', 'lightgreen', 'green']
             )
             fig.update_traces(texttemplate='%{text:.2f}', textposition='outside')
             fig.update_layout(height=400)
@@ -648,7 +679,7 @@ elif menu == "📈 Reportes y Análisis":
             st.subheader("📊 Matriz de Calificaciones: KPI vs Integrante")
             
             pivot_data = df_eval.pivot_table(
-                values='calificacion',
+                values='puntuacion_invertida',
                 index='kpi_nombre',
                 columns='integrante',
                 aggfunc='mean'
@@ -656,9 +687,9 @@ elif menu == "📈 Reportes y Análisis":
             
             fig_heatmap = px.imshow(
                 pivot_data,
-                labels=dict(x="Integrante", y="KPI", color="Calificación"),
-                title="Mapa de Calor: Calificación Promedio por KPI e Integrante",
-                color_continuous_scale=['green', 'yellow', 'orange', 'red'],
+                labels=dict(x="Integrante", y="KPI", color="Puntuación"),
+                title="Mapa de Calor: Puntuación Promedio por KPI e Integrante (mayor = mejor)",
+                color_continuous_scale=['red', 'orange', 'lightgreen', 'green'],
                 aspect='auto'
             )
             fig_heatmap.update_xaxes(side="bottom")
@@ -668,16 +699,18 @@ elif menu == "📈 Reportes y Análisis":
             st.subheader("📅 Tendencia Histórica")
             
             df_eval['fecha_evaluacion'] = pd.to_datetime(df_eval['fecha_evaluacion'])
-            tendencia = df_eval.groupby('fecha_evaluacion')['calificacion'].mean().reset_index()
+            
+            # Usar puntuación invertida para la tendencia
+            tendencia = df_eval.groupby('fecha_evaluacion')['puntuacion_invertida'].mean().reset_index()
             
             fig = px.line(
                 tendencia,
                 x='fecha_evaluacion',
-                y='calificacion',
-                title='Tendencia de Calificación Promedio',
+                y='puntuacion_invertida',
+                title='Tendencia de Puntuación Promedio (mayor = mejor)',
                 markers=True
             )
-            fig.update_yaxes(range=[0, 5], title='Calificación Promedio')
+            fig.update_yaxes(range=[0.5, 4.5], title='Puntuación Promedio')
             fig.update_xaxes(title='Fecha')
             st.plotly_chart(fig, use_container_width=True)
             
@@ -685,54 +718,59 @@ elif menu == "📈 Reportes y Análisis":
             st.markdown("---")
             st.subheader("📈 Evolución por Integrante")
             
-            tendencia_int = df_eval.groupby(['fecha_evaluacion', 'integrante'])['calificacion'].mean().reset_index()
+            tendencia_int = df_eval.groupby(['fecha_evaluacion', 'integrante'])['puntuacion_invertida'].mean().reset_index()
             
             fig_tend_int = px.line(
                 tendencia_int,
                 x='fecha_evaluacion',
-                y='calificacion',
+                y='puntuacion_invertida',
                 color='integrante',
-                title='Evolución de Calificación por Integrante',
+                title='Evolución de Puntuación por Integrante (mayor = mejor)',
                 markers=True
             )
-            fig_tend_int.update_yaxes(range=[0, 5], title='Calificación Promedio')
+            fig_tend_int.update_yaxes(range=[0.5, 4.5], title='Puntuación Promedio')
             fig_tend_int.update_xaxes(title='Fecha')
             st.plotly_chart(fig_tend_int, use_container_width=True)
         
         with tab5:
             st.subheader("⚠️ Análisis de Riesgos y Alertas")
             
-            # Identificar áreas de riesgo
+            # Identificar áreas de riesgo usando PUNTUACIÓN INVERTIDA (baja puntuación = riesgo)
             st.markdown("### 🚨 Alertas de Riesgo")
             
-            # Integrantes con bajo desempeño
-            promedio_integrante = df_eval.groupby('integrante')['calificacion'].mean().reset_index()
-            integrantes_riesgo = promedio_integrante[promedio_integrante['calificacion'] >= 3]
+            # Integrantes con bajo desempeño (puntuación invertida baja)
+            promedio_integrante = df_eval.groupby('integrante')['puntuacion_invertida'].mean().reset_index()
+            integrantes_riesgo = promedio_integrante[promedio_integrante['puntuacion_invertida'] < 2.0]
             
             if len(integrantes_riesgo) > 0:
-                st.error(f"⚠️ **{len(integrantes_riesgo)} integrante(s) con desempeño bajo** (promedio ≥ 3)")
+                st.error(f"⚠️ **{len(integrantes_riesgo)} integrante(s) con desempeño bajo** (puntuación < 2.0)")
                 for _, row in integrantes_riesgo.iterrows():
-                    st.warning(f"🔴 **{row['integrante']}** - Promedio: {row['calificacion']:.2f}")
+                    # Convertir puntuación invertida a calificación original para mostrar
+                    calificacion_original = 5 - row['puntuacion_invertida']
+                    st.warning(f"🔴 **{row['integrante']}** - Puntuación: {row['puntuacion_invertida']:.2f} - {CALIFICACIONES[round(calificacion_original)]}")
             else:
                 st.success("✅ No hay integrantes en zona de riesgo")
             
             st.markdown("---")
             
-            # KPIs problemáticos
+            # KPIs problemáticos (puntuación invertida baja)
             st.markdown("### 📉 KPIs con Bajo Desempeño")
-            promedio_kpi = df_eval.groupby('kpi_nombre')['calificacion'].mean().reset_index()
-            kpis_riesgo = promedio_kpi[promedio_kpi['calificacion'] >= 2.5]
+            promedio_kpi = df_eval.groupby('kpi_nombre')['puntuacion_invertida'].mean().reset_index()
+            kpis_riesgo = promedio_kpi[promedio_kpi['puntuacion_invertida'] < 2.5]
             
             if len(kpis_riesgo) > 0:
+                # Ordenar de menor a mayor puntuación (peores primero)
+                kpis_riesgo = kpis_riesgo.sort_values('puntuacion_invertida', ascending=True)
+                
                 fig_riesgo_kpi = px.bar(
-                    kpis_riesgo.sort_values('calificacion', ascending=False),
-                    x='calificacion',
+                    kpis_riesgo,
+                    x='puntuacion_invertida',
                     y='kpi_nombre',
                     orientation='h',
-                    title='KPIs que Requieren Atención',
-                    text='calificacion',
-                    color='calificacion',
-                    color_continuous_scale=['orange', 'red']
+                    title='KPIs que Requieren Atención (menor puntuación = peor)',
+                    text='puntuacion_invertida',
+                    color='puntuacion_invertida',
+                    color_continuous_scale=['red', 'orange']
                 )
                 fig_riesgo_kpi.update_traces(texttemplate='%{text:.2f}', textposition='outside')
                 st.plotly_chart(fig_riesgo_kpi, use_container_width=True)
@@ -741,32 +779,48 @@ elif menu == "📈 Reportes y Análisis":
             
             st.markdown("---")
             
-            # Matriz de riesgo
-            st.markdown("### 🎯 Matriz de Riesgo: Integrante vs KPI")
+            # Análisis detallado de los que necesitan mejora
+            st.markdown("### 🔍 Análisis Detallado de los que Necesitan Mejora")
             
-            # Encontrar combinaciones de riesgo (calificación >= 3)
-            df_riesgo = df_eval[df_eval['calificacion'] >= 3].copy()
+            # Tomar los 3 peores integrantes (menor puntuación invertida)
+            promedio_integrante_peores = df_eval.groupby('integrante')['puntuacion_invertida'].mean().reset_index()
+            promedio_integrante_peores = promedio_integrante_peores.sort_values('puntuacion_invertida', ascending=True).head(3)
             
-            if len(df_riesgo) > 0:
-                matriz_riesgo = df_riesgo.groupby(['integrante', 'kpi_nombre']).size().reset_index(name='cantidad')
-                
-                fig_matriz = px.density_heatmap(
-                    df_riesgo,
-                    x='integrante',
-                    y='kpi_nombre',
-                    title='Frecuencia de Calificaciones Bajas (Regular/Malo)',
-                    color_continuous_scale='Reds'
-                )
-                st.plotly_chart(fig_matriz, use_container_width=True)
-                
-                st.markdown("#### 📋 Detalle de Evaluaciones en Riesgo")
-                st.dataframe(
-                    df_riesgo[['fecha_evaluacion', 'integrante', 'kpi_nombre', 'calificacion_texto', 'comentario']].sort_values('fecha_evaluacion', ascending=False),
-                    hide_index=True,
-                    use_container_width=True
-                )
-            else:
-                st.success("✅ No hay evaluaciones en zona de riesgo")
+            for idx, row in promedio_integrante_peores.iterrows():
+                with st.expander(f"📋 Análisis de {row['integrante']} (Puntuación: {row['puntuacion_invertida']:.2f})", expanded=idx==0):
+                    df_integrante = df_eval[df_eval['integrante'] == row['integrante']]
+                    
+                    # KPIs problemáticos (calificación original 3 o 4)
+                    kpis_problematicos = df_integrante[df_integrante['calificacion'] >= 3]
+                    
+                    if len(kpis_problematicos) > 0:
+                        st.warning(f"**KPIs que necesitan mejora:** {len(kpis_problematicos)}")
+                        
+                        for _, eval_row in kpis_problematicos.iterrows():
+                            col_kpi1, col_kpi2 = st.columns([2, 1])
+                            with col_kpi1:
+                                st.write(f"**{eval_row['kpi_nombre']}** - {CALIFICACIONES[eval_row['calificacion']]}")
+                            with col_kpi2:
+                                if eval_row['comentario']:
+                                    st.info(f"💬 {eval_row['comentario']}")
+                    else:
+                        st.success("✅ No hay KPIs críticos")
+                    
+                    # Evolución temporal
+                    st.write("**Evolución temporal:**")
+                    df_evo = df_integrante.sort_values('fecha_evaluacion')
+                    if len(df_evo) > 1:
+                        # Usar puntuación invertida para la evolución también
+                        fig_evo = px.line(
+                            df_evo, 
+                            x='fecha_evaluacion', 
+                            y='puntuacion_invertida',
+                            title=f'Evolución de {row["integrante"]}',
+                            markers=True
+                        )
+                        fig_evo.update_yaxes(range=[0.5, 4.5], title='Puntuación (mayor = mejor)')
+                        fig_evo.update_xaxes(title='Fecha')
+                        st.plotly_chart(fig_evo, use_container_width=True)
             
             st.markdown("---")
             
@@ -774,12 +828,12 @@ elif menu == "📈 Reportes y Análisis":
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                total_malo = len(df_eval[df_eval['calificacion'] == 4])
-                pct_malo = (total_malo / len(df_eval) * 100) if len(df_eval) > 0 else 0
+                total_deficiente = len(df_eval[df_eval['calificacion'] == 4])
+                pct_deficiente = (total_deficiente / len(df_eval) * 100) if len(df_eval) > 0 else 0
                 st.metric(
-                    "📊 Evaluaciones Malas",
-                    f"{total_malo}",
-                    f"{pct_malo:.1f}%",
+                    "📊 Evaluaciones Deficientes",
+                    f"{total_deficiente}",
+                    f"{pct_deficiente:.1f}%",
                     delta_color="inverse"
                 )
             
@@ -794,7 +848,7 @@ elif menu == "📈 Reportes y Análisis":
                 )
             
             with col3:
-                riesgo_total = total_malo + total_regular
+                riesgo_total = total_deficiente + total_regular
                 pct_riesgo = (riesgo_total / len(df_eval) * 100) if len(df_eval) > 0 else 0
                 st.metric(
                     "🚨 Total en Riesgo",
@@ -824,5 +878,5 @@ elif menu == "📈 Reportes y Análisis":
         st.info("📭 No hay evaluaciones registradas en el período seleccionado")
 
 st.sidebar.markdown("---")
-st.sidebar.caption("💡 Sistema de KPIs - Equipo Java")
+st.sidebar.caption("💡 KPI Metrics")
 st.sidebar.caption(f"📅 {datetime.now().strftime('%d/%m/%Y')}")
